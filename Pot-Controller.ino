@@ -3,7 +3,7 @@
 #include <SoftwareSerial.h>
 SoftwareSerial Zigbee(2,3); // RX:2, TX:3
 
-#define ID 1
+#define POT_ID 1
 #define ERR_RANGE 10
 #define PUMP 8
 #define LED 9
@@ -80,56 +80,70 @@ StaticJsonDocument<100> doc_3;
 void send_sensorData() {
   JsonObject root = doc_2.to<JsonObject>();
   JsonObject sensorDataSet = root.createNestedObject("sensorDataSet");
+  sensorDataSet["pot_id"] = POT_ID;
   sensorDataSet["temp"] = temp;
   sensorDataSet["humi"] = humi;
   sensorDataSet["soil_humi"] = soil_humi;
 
-  serializeJsonPretty(doc_2, Serial);
-  Serial.write('#');
+  serializeJsonPretty(doc_2, Zigbee);
+  Zigbee.write('#');
 
-//  Serial.println("---Send Sensor Data--");
-//  Serial.print("Temperature: ");
-//  Serial.println(temp);
-//  Serial.print("Humidity: ");
-//  Serial.println(humi);
-//  Serial.print("Soil Humidity: ");
-//  Serial.println(soil_humi);
-//  Serial.println("---------------------");
+  Serial.println("---Send Sensor Data--");
+  Serial.print("Temperature: ");
+  Serial.println(temp);
+  Serial.print("Humidity: ");
+  Serial.println(humi);
+  Serial.print("Soil Humidity: ");
+  Serial.println(soil_humi);
+  Serial.println("---------------------");
 }
 
 void send_stateData() {
-  int i = 0;
-  JsonObject root2 = doc_3.to<JsonObject>();
-  JsonObject stateDataSet = root2.createNestedObject("stateDataSet");
-  stateDataSet["auto"] = auto_control_ing;
+  bool isAuto, isWater, isLed;
+  if(auto_control_ing == 1) {
+    isAuto = true;
+  } 
+  else {
+    isAuto = false;
+  }
   if(C_M_001_ing == 1 || C_M_002_ing == 1) {
-    stateDataSet["water"] = 1;
-    i = 1;
+    isWater = true;
   }
   else {
-    stateDataSet["water"] = 0;
-    i = 0;
+    isWater = false;
   }
-  stateDataSet["LED"] = LED_ing;
+  if(LED_ing == 1) {
+    isLed = true;
+  }
+  else {
+    isLed = false;
+  }
+  
+  JsonObject root2 = doc_3.to<JsonObject>();
+  JsonObject stateDataSet = root2.createNestedObject("stateDataSet");
+  stateDataSet["pot_id"] = POT_ID;
+  stateDataSet["is_auto"] = isAuto;
+  stateDataSet["is_water"] = isWater;
+  stateDataSet["is_led"] = isLed;
 
-  serializeJsonPretty(doc_3, Serial);
-  Serial.write('#');
+  serializeJsonPretty(doc_3, Zigbee);
+  Zigbee.write('#');
 
   Serial.println("---Send state Data---");
   Serial.print("Auto control: ");
-  Serial.println(auto_control_ing);
+  Serial.println(isAuto);
   Serial.print("Water Supply: ");
-  Serial.println(i);
+  Serial.println(isWater);
   Serial.print("LED: ");
-  Serial.println(LED_ing);
+  Serial.println(isLed);
   Serial.println("---------------------");
 }
 
 // message format: JSON
 void process_message() {
   String buffer;
-  while(Serial.available()){ // read just 1 line;
-    char data = Serial.read();
+  while(Zigbee.available()){ // read just 1 line;
+    char data = Zigbee.read();
     if(data == '\n') {
       break;
     }
@@ -144,15 +158,20 @@ void process_message() {
 
   deserializeJson(doc, buffer);
 
-  // ID CHECK
-  if(doc["id"] == ID) {
-    if(doc["requestData"] == 1) { // send sensor data to Zigbee
-      if(temp != 0) {
-        send_sensorData();
-      }
+  // sensor, state data
+  if(doc["sensorData"] == 1) { // send sensor data to Zigbee
+    if(temp != 0) {
+      send_sensorData();
     }
-    else if(doc["code"] == "C_S_001") { // Auto control ON
-      set_humi = doc["set_humi"];
+  }
+  else if(doc["stateData"] == 1) { // send sensor data to Zigbee
+    send_stateData();
+  }
+  
+  // ID CHECK
+  if(doc["potId"] == POT_ID) {
+    if(doc["code"] == "C_S_001") { // Auto control ON
+      set_humi = doc["setHumi"];
       auto_control_ing = 1;
       auto_control_wait = 0;
       send_stateData();
@@ -238,7 +257,7 @@ void process_message() {
 
 void loop() {
   // data from Zigbee
-  if(Serial.available()){
+  if(Zigbee.available()){
      process_message();
   }
   

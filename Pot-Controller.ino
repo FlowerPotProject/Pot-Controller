@@ -1,7 +1,5 @@
 #include <ArduinoJson.h>
 #include <DHT11.h>
-#include <SoftwareSerial.h>
-SoftwareSerial Zigbee(2,3); // RX:2, TX:3
 
 #define POT_ID 1
 #define ERR_RANGE 10
@@ -10,7 +8,6 @@ SoftwareSerial Zigbee(2,3); // RX:2, TX:3
 #define DHT_SENSOR A0 
 #define SOIL_SENSOR A1
 #define WAIT_TIME 60000
-
 
 DHT11 dht11(DHT_SENSOR);
 
@@ -40,10 +37,13 @@ int soil_humi;
 
 void setup() {
   Serial.begin(9600);
-  Zigbee.begin(9600);
+  Serial3.begin(9600);
 
   pinMode(PUMP, OUTPUT);
   pinMode(LED, OUTPUT);
+
+  digitalWrite(PUMP, HIGH);
+  digitalWrite(LED, HIGH);
   
   Serial.println("POT Controller Start...");
 }
@@ -51,7 +51,7 @@ void setup() {
 // data from Soil Sensor, DHT
 void read_sensor() {
   int i = analogRead(SOIL_SENSOR);
-  soil_humi = map(i, 0, 800, 0, 100);
+  soil_humi = map(i, 0, 950, 0, 100);
 //  Serial.println("-----Sensor Data-----");
 //  Serial.print("Soil Humidity: ");
 //  Serial.print(soil_humi);
@@ -76,7 +76,7 @@ StaticJsonDocument<200> doc;
 StaticJsonDocument<100> doc_2;
 StaticJsonDocument<100> doc_3;
 
-// data to Zigbee
+// data to Serial3
 void send_sensorData() {
   JsonObject root = doc_2.to<JsonObject>();
   JsonObject sensorDataSet = root.createNestedObject("sensorDataSet");
@@ -85,8 +85,8 @@ void send_sensorData() {
   sensorDataSet["humi"] = humi;
   sensorDataSet["soil_humi"] = soil_humi;
 
-  serializeJsonPretty(doc_2, Zigbee);
-  Zigbee.write('#');
+  serializeJsonPretty(doc_2, Serial3);
+  Serial3.write('#');
 
   Serial.println("---Send Sensor Data--");
   Serial.print("Temperature: ");
@@ -126,8 +126,8 @@ void send_stateData() {
   stateDataSet["is_water"] = isWater;
   stateDataSet["is_led"] = isLed;
 
-  serializeJsonPretty(doc_3, Zigbee);
-  Zigbee.write('#');
+  serializeJsonPretty(doc_3, Serial3);
+  Serial3.write('#');
 
   Serial.println("---Send state Data---");
   Serial.print("Auto control: ");
@@ -142,8 +142,8 @@ void send_stateData() {
 // message format: JSON
 void process_message() {
   String buffer;
-  while(Zigbee.available()){ // read just 1 line;
-    char data = Zigbee.read();
+  while(Serial3.available()){ // read just 1 line;
+    char data = Serial3.read();
     if(data == '\n') {
       break;
     }
@@ -158,19 +158,17 @@ void process_message() {
 
   deserializeJson(doc, buffer);
 
-  // sensor, state data
-  if(doc["sensorData"] == 1) { // send sensor data to Zigbee
-    if(temp != 0) {
-      send_sensorData();
-    }
-  }
-  else if(doc["stateData"] == 1) { // send sensor data to Zigbee
+  if(doc["stateData"] == 1) { // send state data to Zigbee
     send_stateData();
   }
-  
   // ID CHECK
   if(doc["potId"] == POT_ID) {
-    if(doc["code"] == "C_S_001") { // Auto control ON
+    if(doc["sensorData"] == 1) { // send sensor data to Zigbee
+      if(temp != NULL) {
+        send_sensorData();
+      }
+    }
+    else if(doc["code"] == "C_S_001") { // Auto control ON
       set_humi = doc["setHumi"];
       auto_control_ing = 1;
       auto_control_wait = 0;
@@ -180,7 +178,7 @@ void process_message() {
       Serial.println("---------------------");
     }
     else if(doc["code"] == "C_S_002") { // Auto control OFF
-      digitalWrite(PUMP, LOW);
+      digitalWrite(PUMP, HIGH);
       auto_control_ing = 0;
       auto_control_wait = 0;
       send_stateData();
@@ -191,7 +189,7 @@ void process_message() {
     else if(doc["code"] == "C_M_001") { // water supply (time)
       if(auto_control_ing == 0) {
         C_M_001_sec = doc["time"];
-        digitalWrite(PUMP, HIGH);
+        digitalWrite(PUMP, LOW);
         time_previous_001 = millis();
         C_M_001_ing = 1;
         send_stateData();
@@ -207,7 +205,7 @@ void process_message() {
       if(auto_control_ing == 0) {
         C_M_002_flux = doc["flux"];
         C_M_002_ms = C_M_002_flux*50; // Convert flux to time (1ml = 50ms)
-        digitalWrite(PUMP, HIGH);
+        digitalWrite(PUMP, LOW);
         time_previous_002 = millis();
         C_M_002_ing = 1;
         send_stateData();
@@ -220,23 +218,23 @@ void process_message() {
       }
     }
     else if(doc["code"] == "C_M_003") { // LED ON
-      digitalWrite(LED, HIGH);
+      digitalWrite(LED, LOW);
       LED_ing = 1;
       send_stateData();
       Serial.println("----Control Panel----");
-      Serial.print("LED ON");
+      Serial.println("LED ON");
       Serial.println("---------------------");
     }
     else if(doc["code"] == "C_M_004") { // LED OFF
-      digitalWrite(LED, LOW);
+      digitalWrite(LED, HIGH);
       LED_ing = 0;
       send_stateData();
       Serial.println("----Control Panel----");
-      Serial.print("LED OFF");
+      Serial.println("LED OFF");
       Serial.println("---------------------");
     }
     else if(doc["code"] == "C_M_005") { // Stop working
-      digitalWrite(PUMP, LOW);
+      digitalWrite(PUMP, HIGH);
       C_M_001_ing = 0;
       C_M_002_ing = 0;
       auto_control_ing = 0;
@@ -252,12 +250,15 @@ void process_message() {
       Serial.println("This code doesn't exist");
     }
   }
+  else {
+    Serial.println("ID doesn't match");
+  }
 }
 
 
 void loop() {
   // data from Zigbee
-  if(Zigbee.available()){
+  if(Serial3.available()){
      process_message();
   }
   
@@ -272,7 +273,7 @@ void loop() {
   if(auto_control_ing == 1) {
     if(set_humi > soil_humi+ERR_RANGE) {
       if(auto_control_wait == 0) {
-        digitalWrite(PUMP, HIGH);
+        digitalWrite(PUMP, LOW);
         if(auto_control_on == 0) {
           Serial.println("----Control Panel----");
           Serial.println("Auto water supply ON");
@@ -284,7 +285,7 @@ void loop() {
     }
     else {
       if(auto_control_wait == 0) {
-        digitalWrite(PUMP, LOW);
+        digitalWrite(PUMP, HIGH);
         auto_control_wait = 1;
         time_previous_wait = millis();
         if(auto_control_off == 0) {
@@ -307,7 +308,7 @@ void loop() {
   // Stop working
   if(C_M_001_ing == 1) {
     if(time_current - time_previous_001 >= C_M_001_sec*1000) {
-      digitalWrite(PUMP, LOW);
+      digitalWrite(PUMP, HIGH);
       C_M_001_ing = 0;
       send_stateData();
       Serial.println("----Control Panel----");
@@ -320,7 +321,7 @@ void loop() {
   }
   if(C_M_002_ing == 1) {
     if(time_current - time_previous_002 >= C_M_002_ms) {
-      digitalWrite(PUMP, LOW);
+      digitalWrite(PUMP, HIGH);
       C_M_002_ing = 0;
       send_stateData();
       Serial.println("----Control Panel----");

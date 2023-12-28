@@ -1,5 +1,6 @@
 #include <ArduinoJson.h>
 #include <DHT11.h>
+#include <Adafruit_NeoPixel.h>
 
 #define POT_ID 1
 #define ERR_RANGE 10
@@ -9,7 +10,12 @@
 #define SOIL_SENSOR A1
 #define WAIT_TIME 60000
 
+#define LED_PIXEL 6
+#define NUMPIXELS 12
+
 DHT11 dht11(DHT_SENSOR);
+
+Adafruit_NeoPixel pixels(NUMPIXELS, LED_PIXEL, NEO_GRB + NEO_KHZ800);
 
 // control variable
 unsigned long C_M_001_sec;      // water supply operation time (time)
@@ -219,6 +225,17 @@ void process_message() {
     }
     else if(doc["code"] == "C_M_003") { // LED ON
       digitalWrite(LED, LOW);
+      pixels.begin();
+      for(int i=0; i<NUMPIXELS; i++) {
+        if(i%2 == 0) {
+          pixels.setPixelColor(i, 255, 0, 0);
+        }
+        else {
+          pixels.setPixelColor(i, 0, 0, 255);
+        }
+      }
+      pixels.show();
+
       LED_ing = 1;
       send_stateData();
       Serial.println("----Control Panel----");
@@ -226,6 +243,8 @@ void process_message() {
       Serial.println("---------------------");
     }
     else if(doc["code"] == "C_M_004") { // LED OFF
+      pixels.clear();
+      pixels.show();
       digitalWrite(LED, HIGH);
       LED_ing = 0;
       send_stateData();
